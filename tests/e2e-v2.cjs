@@ -57,6 +57,7 @@ function makeMock() {
     // 오류 시뮬레이션: 429(분당 한도, 28초 대기) / 네트워크 끊김 / 잘못된 키
     if (m.fail === '429') return route.fulfill({ status: 429, headers: Object.assign({ 'content-type': 'application/json' }, cors), body: JSON.stringify({ error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'You exceeded your current quota. Please retry in 28.6s.', details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier' }] }, { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '28s' }] } }) });
     if (m.fail === 'abort') return route.abort('internetdisconnected');
+    if (m.fail === 'stall') { m.fail = null; m.stalled = (m.stalled || 0) + 1; await new Promise(r => setTimeout(r, 1500)); return route.abort('timedout').catch(() => {}); } // 첫 요청만 멈춤
     if (m.fail === 'badkey') return route.fulfill({ status: 400, headers: Object.assign({ 'content-type': 'application/json' }, cors), body: JSON.stringify({ error: { code: 400, status: 'INVALID_ARGUMENT', message: 'API key not valid. Please pass a valid API key.' } }) });
     if (((body.generationConfig || {}).responseModalities || []).includes('AUDIO')) {
       m.calls.TTS++;
@@ -225,6 +226,11 @@ async function shadowClips(p, doShot) {
   ok(/요청 한도를 넘었어요/.test(tm) && /\d+초/.test(tm), '429(분당 한도) → 한국어 안내 + 대기 시간: ' + tm);
   tm = await toastAfter('abort');
   ok(/인터넷 연결을 확인/.test(tm), '네트워크 끊김 → (1회 재시도 후) 한국어 안내: ' + tm);
+  // 응답 멈춤 → 짧은 제한 시간 뒤 자동 재시도로 성공 (+ '다시 요청하고 있어요' 안내)
+  mock.fail = 'stall'; global.__expectApiErrors = true;
+  const stall = await p.evaluate(async () => { const t = performance.now(); try { const o = await window.SpeakAI.json('TASK: PING. Return JSON {"ok": true}.', 'ping', { timeouts: [800, 3000] }); return { ok: !!o, ms: Math.round(performance.now() - t), toast: document.querySelector('#toast').textContent }; } catch (e) { return { err: e.kind }; } });
+  global.__expectApiErrors = false;
+  ok(stall.ok && mock.stalled === 1 && /다시 요청하고 있어요/.test(stall.toast), '응답 멈춤 → 자동 재시도로 성공 + 안내 (' + JSON.stringify(stall) + ')');
   tm = await toastAfter('badkey');
   ok(/AI 키가 맞지 않는/.test(tm), '잘못된 키 → 한국어 안내: ' + tm);
   // 소리 설정: 재생 볼륨 부스트(기본 2×) · 볼륨 팁 · AI 음성(Gemini TTS) + 캐시

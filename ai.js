@@ -86,23 +86,27 @@
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function status(msg) { try { if (cfg.onStatus) cfg.onStatus(msg); } catch (e) { /* noop */ } }
   /**
-   * 요청 1번 + 필요할 때만 재시도 1번 (무료 등급은 분당 15회라 동시에 여러 번 보내지 않음).
-   * - 응답이 늦음(timeout)·일시적 네트워크 오류·서버 바쁨(5xx) → 바로 1번 더
+   * 요청은 한 번에 하나씩, 필요할 때만 재시도 (무료 등급은 분당 15회라 동시에 여러 번 보내지 않음).
+   * - 응답이 늦음(timeout)·서버 바쁨(5xx) → 짧은 제한 시간으로 최대 2번 더 / 일시적 네트워크 오류 → 1번 더
    * - 분당 한도(429, 대기 20초 이하) → 서버가 알려 준 시간만큼 기다렸다가 1번 더
    * 실측(2026-09): gemini-3.5-flash-lite 응답은 보통 0.6~1.4초지만 가끔 10~40초씩 멈춤 → 첫 시도는 짧게 끊는다.
    */
   function withRetry(make, timeouts) {
-    var t1 = timeouts[0], t2 = timeouts[1] || timeouts[0];
-    return make(t1).catch(function (e) {
-      var k = e && e.kind;
-      if (k === 'timeout' || k === 'busy') return make(t2);
-      if (k === 'network') return sleep(800).then(function () { return make(t2); });
-      if (k === 'quota' && !e.daily && e.retryAfter && e.retryAfter <= 20) {
-        status('요청 한도(분당) — ' + Math.ceil(e.retryAfter) + '초 기다렸다가 다시 보낼게요');
-        return sleep(e.retryAfter * 1000 + 500).then(function () { return make(t2); });
-      }
-      throw e;
-    });
+    var waitedQuota = false;
+    function attempt(n) {
+      return make(timeouts[Math.min(n, timeouts.length - 1)]).catch(function (e) {
+        var k = e && e.kind, more = n + 1 < timeouts.length;
+        if ((k === 'timeout' || k === 'busy') && more) { if (n === 0) status('AI 응답이 늦어서 다시 요청하고 있어요…'); return attempt(n + 1); }
+        if (k === 'network' && more && n === 0) return sleep(800).then(function () { return attempt(n + 1); });
+        if (k === 'quota' && !waitedQuota && !e.daily && e.retryAfter && e.retryAfter <= 20) {
+          waitedQuota = true;
+          status('요청 한도(분당) — ' + Math.ceil(e.retryAfter) + '초 기다렸다가 다시 보낼게요');
+          return sleep(e.retryAfter * 1000 + 500).then(function () { return attempt(n + 1); });
+        }
+        throw e;
+      });
+    }
+    return attempt(0);
   }
 
   function geminiMime(m) {
@@ -118,7 +122,7 @@
     opt = opt || {};
     var p = provider(), key = getKey(p), m = model();
     if (!key) return Promise.reject(AIError('nokey'));
-    var req, timeouts = opt.timeouts || [8000, 25000];
+    var req, timeouts = opt.timeouts || [8000, 12000, 15000]; // 실측: 멈춤이 연달아 오는 경우가 있어 짧게 3번까지 (최악 약 35초)
     if (p === 'gemini') {
       // responseSchema는 실측에서 형식 이점 없이 지연 꼬리(24~43초)가 커져 쓰지 않음. JSON 모드 + core.js 검증/보정으로 충분(실측 23/23 유효).
       var gbody = JSON.stringify({
@@ -151,7 +155,7 @@
   }
 
   /** 받아쓰기 제한 시간: 짧은 녹음(≈10초, 40KB)은 첫 시도 약 10초에서 끊고 재시도, 긴 녹음(4-3-2 2분)은 더 기다림 */
-  function sttTimeouts(blob) { var kb = (blob && blob.size || 0) / 1024; return [Math.min(30000, 9000 + kb * 50), 45000]; }
+  function sttTimeouts(blob) { var kb = (blob && blob.size || 0) / 1024, t = Math.min(30000, 9000 + kb * 50); return [t, t + 4000, 20000 + kb * 50]; }
   /** 음성 → 영어 텍스트. 실패하면 reject (호출 측이 Web Speech 결과로 대체) */
   function transcribe(blob, mime) {
     var p = provider(), key = getKey(p);
