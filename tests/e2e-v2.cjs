@@ -30,20 +30,49 @@ const INIT = () => {
   window.__plays = 0;
   const op = HTMLMediaElement.prototype.play;
   HTMLMediaElement.prototype.play = function () { window.__plays++; return op.apply(this, arguments); };
+  // v2.1: 녹음 재생은 Web Audio(게인+리미터) — 재생 횟수와 게인값 기록
+  window.__gains = [];
+  try {
+    const ost = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function () { window.__plays++; return ost.apply(this, arguments); };
+    const ocg = BaseAudioContext.prototype.createGain;
+    BaseAudioContext.prototype.createGain = function () { const g = ocg.apply(this, arguments); window.__gains.push(g); return g; };
+  } catch (e) {}
+  // 마이크 스트림 추적 (녹음 후 모든 트랙이 꺼지는지)
+  window.__streams = [];
+  try {
+    const ogum = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = function (c) { return ogum(c).then(function (s) { window.__streams.push(s); return s; }); };
+  } catch (e) {}
 };
 
 function makeMock() {
-  const m = { transcripts: [], roleplay: [], calls: { TRANSCRIBE: 0, ROLEPLAY: 0, FEEDBACK: 0, PING: 0 }, keysSeen: new Set(), fbDelay: 900 };
+  const m = { transcripts: [], roleplay: [], calls: { TRANSCRIBE: 0, ROLEPLAY: 0, FEEDBACK: 0, PING: 0, TTS: 0 }, keysSeen: new Set(), fbDelay: 900, fail: null };
   m.handler = async (route) => {
     const req = route.request();
     const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };
     if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
     m.keysSeen.add(req.headers()['x-goog-api-key']);
     let body = {}; try { body = JSON.parse(req.postData() || '{}'); } catch (e) {}
+    // 오류 시뮬레이션: 429(분당 한도, 28초 대기) / 네트워크 끊김 / 잘못된 키
+    if (m.fail === '429') return route.fulfill({ status: 429, headers: Object.assign({ 'content-type': 'application/json' }, cors), body: JSON.stringify({ error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'You exceeded your current quota. Please retry in 28.6s.', details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier' }] }, { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '28s' }] } }) });
+    if (m.fail === 'abort') return route.abort('internetdisconnected');
+    if (m.fail === 'badkey') return route.fulfill({ status: 400, headers: Object.assign({ 'content-type': 'application/json' }, cors), body: JSON.stringify({ error: { code: 400, status: 'INVALID_ARGUMENT', message: 'API key not valid. Please pass a valid API key.' } }) });
+    if (((body.generationConfig || {}).responseModalities || []).includes('AUDIO')) {
+      m.calls.TTS++;
+      const n = 7200, buf = Buffer.alloc(44 + n * 2); // 0.3초 440Hz, 24kHz 16bit WAV
+      buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVEfmt ', 8); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+      buf.writeUInt32LE(24000, 24); buf.writeUInt32LE(48000, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34); buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+      for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(Math.sin(i / 24000 * 2 * Math.PI * 440) * 12000), 44 + i * 2);
+      return route.fulfill({ status: 200, headers: Object.assign({ 'content-type': 'application/json' }, cors), body: JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/wav', data: buf.toString('base64') } }] } }] }) });
+    }
     const sys = (((body.systemInstruction || {}).parts || [])[0] || {}).text || '';
     let out;
     if (sys.includes('TASK: TRANSCRIBE')) { m.calls.TRANSCRIBE++; out = { text: m.transcripts.length ? m.transcripts.shift() : 'I think this is a good idea because it saves time.' }; }
-    else if (sys.includes('TASK: ROLEPLAY')) { m.calls.ROLEPLAY++; out = m.roleplay.shift() || { reply: 'Okay, sounds good.', understood: true, on_topic: true, is_repair: false, end: true }; }
+    else if (sys.includes('TASK: ROLEPLAY')) {
+      m.calls.ROLEPLAY++;
+      if (m.rpHang) { m.rpHang = false; await new Promise(r => setTimeout(r, 4000)); return route.abort('failed').catch(() => {}); } // 응답 전에 앱이 닫힌 상황
+      out = m.roleplay.shift() || { reply: 'Okay, sounds good.', understood: true, on_topic: true, is_repair: false, end: true }; }
     else if (sys.includes('TASK: FEEDBACK')) {
       m.calls.FEEDBACK++;
       await new Promise(r => setTimeout(r, m.fbDelay));
@@ -75,7 +104,7 @@ async function newCtx(browser) {
 function watch(page, errs) {
   page.on('pageerror', e => errs.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errs.push('console: ' + m.text()); });
-  page.on('response', r => { if (r.status() >= 400 && !/favicon\.ico$/.test(r.url())) errs.push('HTTP ' + r.status() + ' ' + r.url()); });
+  page.on('response', r => { if (r.status() >= 400 && !/favicon\.ico$/.test(r.url()) && !(global.__expectApiErrors && /generativelanguage/.test(r.url()))) errs.push('HTTP ' + r.status() + ' ' + r.url()); });
   page.on('dialog', d => d.accept());
 }
 const act = (p, a, extra) => p.click('[data-act="' + a + '"]' + (extra || ''));
@@ -140,6 +169,10 @@ async function shadowClips(p, doShot) {
       const after = await p.evaluate(() => window.__plays), spokenAfter = await p.evaluate(() => window.__spoken.length);
       if (first) {
         ok(after > before && spokenAfter > spokenBefore, '비교: 원문(TTS)과 내 녹음 모두 재생');
+        const g = await p.evaluate(() => window.__gains.map(x => x.gain.value));
+        ok(g.length > 0 && Math.max.apply(null, g) >= 2, '녹음 재생 볼륨 부스트: Web Audio 게인 ≥ 2× (기본 설정) → ' + g.slice(-1)[0]);
+        const mic = await p.evaluate(() => ({ n: window.__streams.length, live: window.__streams.reduce((a, s) => a + s.getTracks().filter(t => t.readyState === 'live').length, 0) }));
+        ok(mic.n > 0 && mic.live === 0, '녹음이 끝나면 마이크 트랙 모두 해제 (iOS 수화부/작은 소리 방지) — 스트림 ' + mic.n + '개, 살아 있는 트랙 ' + mic.live);
         await p.waitForSelector('#shCmp:not([hidden])', { timeout: 8000 }).catch(() => {});
         if (doShot) await shot(p, 'shadowing');
         first = false;
@@ -179,6 +212,33 @@ async function shadowClips(p, doShot) {
   await p.waitForFunction(() => document.querySelector('#toast').textContent.includes('연결됐어요'), null, { timeout: 8000 });
   ok(true, '연결 테스트 (목) 성공 토스트');
   ok(await p.evaluate(() => !JSON.stringify(window.SpeakApp.db).includes('test-key-not-real')), '키는 앱 데이터(백업 대상)에 들어가지 않음');
+  // 오류 메시지 (한국어) — 429 / 네트워크 / 잘못된 키
+  const toastAfter = async (fail) => {
+    mock.fail = fail; global.__expectApiErrors = true;
+    await p.evaluate(() => { document.querySelector('#toast').textContent = ''; });
+    await act(p, 'key-test');
+    await p.waitForFunction(() => /[가-힣]/.test(document.querySelector('#toast').textContent), null, { timeout: 12000 }).catch(() => {});
+    mock.fail = null; global.__expectApiErrors = false;
+    return p.evaluate(() => document.querySelector('#toast').textContent);
+  };
+  let tm = await toastAfter('429');
+  ok(/요청 한도를 넘었어요/.test(tm) && /\d+초/.test(tm), '429(분당 한도) → 한국어 안내 + 대기 시간: ' + tm);
+  tm = await toastAfter('abort');
+  ok(/인터넷 연결을 확인/.test(tm), '네트워크 끊김 → (1회 재시도 후) 한국어 안내: ' + tm);
+  tm = await toastAfter('badkey');
+  ok(/AI 키가 맞지 않는/.test(tm), '잘못된 키 → 한국어 안내: ' + tm);
+  // 소리 설정: 재생 볼륨 부스트(기본 2×) · 볼륨 팁 · AI 음성(Gemini TTS) + 캐시
+  ok(await p.evaluate(() => document.querySelector('select[data-set="playBoost"]').value === '2' && document.body.textContent.includes('무음 스위치')), '설정: 재생 볼륨 부스트 기본 2× + 볼륨 팁 표시');
+  await p.check('input[data-set="aiVoice"]');
+  const plays0 = await p.evaluate(() => window.__plays);
+  await act(p, 'tts-test');
+  await p.waitForFunction((n) => window.__plays > n, plays0, { timeout: 8000 }).catch(() => {});
+  await p.waitForTimeout(600);
+  await act(p, 'tts-test');
+  await p.waitForTimeout(800);
+  const plays1 = await p.evaluate(() => window.__plays);
+  ok(mock.calls.TTS === 1 && plays1 >= plays0 + 2, 'AI 음성: Gemini TTS 1번 생성 → 두 번째는 기기 캐시에서 재생 (TTS 호출 ' + mock.calls.TTS + ', 재생 ' + (plays1 - plays0) + ')');
+  await p.uncheck('input[data-set="aiVoice"]');
   await p.evaluate(() => document.querySelector('#ai').scrollIntoView());
   await shot(p, 'settings-ai');
   // 홈
@@ -208,8 +268,14 @@ async function shadowClips(p, doShot) {
   await p.waitForFunction(() => document.querySelectorAll('.bubble.ai:not(.pending)').length >= 2, null, { timeout: 10000 });
   mock.transcripts.push('I go left at the bread shop, then bridge');
   mock.roleplay.push({ reply: 'Do you mean you turn left at the bakery and then cross the bridge?', understood: false, on_topic: true, is_repair: true, end: false });
+  mock.rpHang = true;
   await record(p, 'rp-rec', 1500);
+  await p.waitForSelector('.bubble.ai.pending', { timeout: 10000 });
+  await p.reload(); // AI 답을 기다리는 중에 앱이 닫힘
+  await p.waitForSelector('.huge-start, #chat');
+  if (await p.isVisible('.huge-start')) await act(p, 'start');
   await p.waitForSelector('.bubble.ai.repair', { timeout: 10000 });
+  ok(true, 'AI 답 대기 중 앱을 닫았다 열어도 → 상대 답을 자동으로 다시 받아 대화 이어짐');
   ok(true, 'AI 수리 질문 “Do you mean …?” 표시');
   mock.transcripts.push('Yes, left at the bakery, then I cross the bridge. Thank you very much for your kind help!');
   mock.roleplay.push({ reply: "Exactly. You'll see the station on your right. Have a good day!", understood: true, on_topic: true, is_repair: false, end: true });
@@ -364,7 +430,7 @@ async function shadowClips(p, doShot) {
   const after = await p.evaluate(() => ({ s: window.SpeakApp.db.sessions.length, e: window.SpeakApp.db.errors.length, intro: window.SpeakApp.db.profile.introRecId, cards: window.SpeakApp.db.cards.length, mine: window.SpeakApp.db.cards.reduce((n, c) => n + c.mine.length, 0) }));
   ok(after.s === 0 && after.e === 0 && !after.intro && after.mine === 0 && after.cards > 100, '녹음 0개 · 대화/오류/내 문장 삭제 · 청크는 유지');
   ok(mock.keysSeen.size === 1 && mock.keysSeen.has(FAKE_KEY), 'AI 요청은 사용자가 넣은 키로만 (헤더)');
-  ok(mock.calls.TRANSCRIBE >= 8 && mock.calls.ROLEPLAY === 3 && mock.calls.FEEDBACK === 1, 'AI 호출: 받아쓰기 ' + mock.calls.TRANSCRIBE + ' · 롤플레이 ' + mock.calls.ROLEPLAY + ' · 피드백 ' + mock.calls.FEEDBACK);
+  ok(mock.calls.TRANSCRIBE >= 8 && mock.calls.ROLEPLAY === 4 && mock.calls.FEEDBACK === 1, 'AI 호출(롤플레이는 중단 후 재요청 1회 포함): 받아쓰기 ' + mock.calls.TRANSCRIBE + ' · 롤플레이 ' + mock.calls.ROLEPLAY + ' · 피드백 ' + mock.calls.FEEDBACK);
   await ctx.close();
 
   /* ===== 6. 키 없이: 쉐도잉 → 4-3-2(녹음) → 셀프 교정 → 청크 ===== */

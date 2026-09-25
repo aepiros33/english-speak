@@ -468,10 +468,12 @@
       items: clean.slice(0, 3),
       repair_question: str(o.repair_question) || null
     };
-    if (!data.on_topic && !data.repair_question) data.repair_question = 'Sorry, I want to make sure I understood. Could you say that another way?';
-    if (data.on_topic) data.repair_question = data.repair_question || null;
+    if ((!data.on_topic || !data.comprehensible) && !data.repair_question) data.repair_question = 'Sorry, I want to make sure I understood. Could you say that another way?';
+    if (data.on_topic && data.comprehensible) data.repair_question = data.repair_question || null;
     return { ok: true, data: data, dropped: items.length - data.items.length };
   }
+  /** 확인 질문(repair)을 먼저 물어야 하는가: 주제를 벗어났거나, 뜻이 안 통했을 때 */
+  function needsRepair(d) { return !!(d && (d.on_topic === false || d.comprehensible === false) && d.repair_question); }
   /** 교정 항목이 0개일 때: 가장 긴 발화를 더 매끄럽게 다시 말하기 (칭찬만 하는 카드 금지) */
   function fallbackItem(utterances) {
     var best = (utterances || []).filter(Boolean).sort(function (a, b) { return b.length - a.length; })[0];
@@ -525,6 +527,16 @@
 
   /* ---------------- v2: 녹음 레벨 분석 (침묵·말한 길이) ---------------- */
   /** levels: RMS 배열, frameMs 간격. 잡음 적응 임계값. 1초 이상 침묵을 '멈춤'으로 센다 */
+  /**
+   * 녹음 재생 증폭량. boost ≤ 1 이면 원음(1). 아니면 최고점을 -1dBFS 근처까지 정규화(최대 4배)한 뒤 boost를 곱함.
+   * 넘치는 부분은 재생 체인의 리미터(DynamicsCompressor)가 눌러 줌. 상한 12배.
+   */
+  function playbackGain(peak, boost) {
+    boost = Number(boost) || 1;
+    if (boost <= 1) return 1;
+    var norm = peak > 0 ? Math.min(4, Math.max(1, 0.9 / peak)) : 1;
+    return Math.min(12, Math.round(boost * norm * 100) / 100);
+  }
   function analyzeLevels(levels, frameMs, opt) {
     opt = opt || {};
     var n = levels.length;
@@ -578,9 +590,9 @@
     Mix: { shuffle: shuffle, interleave: interleave, roundRobin: roundRobin },
     Days: { weekStart: weekStart, weekKeys: weekKeys, streak: streak, weekStats: weekStats, isActiveDay: isActiveDay },
     Routine: { STEPS: STEPS, durations: durations, fourThreeTwo: fourThreeTwo, plan: routinePlan, create: createRoutine, completeStep: completeStep, isComplete: isRoutineComplete, checklist: checklist },
-    Feedback: { parseJSON: parseJSONLoose, validate: validateFeedback, fallbackItem: fallbackItem, validateRoleplay: validateRoleplay, LAYERS: LAYERS, SEVERITIES: SEVERITIES },
+    Feedback: { parseJSON: parseJSONLoose, validate: validateFeedback, needsRepair: needsRepair, fallbackItem: fallbackItem, validateRoleplay: validateRoleplay, LAYERS: LAYERS, SEVERITIES: SEVERITIES },
     Errors: { add: addError, recent: recentErrors, pickWarmup: pickWarmup, key: errorKey },
-    Audio: { analyzeLevels: analyzeLevels },
+    Audio: { analyzeLevels: analyzeLevels, playbackGain: playbackGain },
     Migrate: { v1: migrateV1 }
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

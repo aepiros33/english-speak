@@ -100,6 +100,16 @@ test('주제에서 벗어남 → 확인 질문(repair_question) 보장', () => {
   const v2 = F.validate({ on_topic: false, items: [], repair_question: 'Do you mean the budget meeting?' });
   assert.strictEqual(v2.data.repair_question, 'Do you mean the budget meeting?');
 });
+test('뜻이 안 통함(comprehensible=false) → 주제가 맞아도 확인 질문 먼저 (실제 Gemini 응답 패턴)', () => {
+  const real = { comprehensible: false, on_topic: true, items: [], repair_question: 'Do you mean you are free next week?' };
+  const v = F.validate(real);
+  assert.strictEqual(v.data.repair_question, 'Do you mean you are free next week?');
+  assert.ok(F.needsRepair(v.data));
+  const v2 = F.validate({ comprehensible: false, on_topic: true, items: [], repair_question: null });
+  assert.ok(v2.data.repair_question && F.needsRepair(v2.data));
+  assert.ok(!F.needsRepair({ comprehensible: true, on_topic: true, repair_question: null }));
+  assert.ok(F.needsRepair({ comprehensible: true, on_topic: false, repair_question: 'Do you mean ...?' }));
+});
 test('교정 0개면 대체 항목(다시 말하기) — 칭찬만 하는 카드 금지', () => {
   const it = F.fallbackItem(['short', 'This is the longest sentence here']);
   assert.strictEqual(it.improved, 'This is the longest sentence here'); assert.ok(!/great|잘했/i.test(it.issue_ko));
@@ -274,4 +284,12 @@ test('롤플레이 12개: PRD 필드, 전략 강제(빠른 말) 2개 이상', ()
 });
 test('4-3-2 주제 20개, 발음 힌트 20개', () => { assert.strictEqual(C.TOPICS.length, 20); assert.strictEqual(Object.keys(C.HINTS).length, 20); });
 
+test('재생 볼륨 부스트: 1×는 원음, 작은 녹음은 정규화 후 증폭(상한 12배), 큰 녹음은 부스트만', () => {
+  assert.strictEqual(A.playbackGain(0.1, 1), 1);
+  assert.strictEqual(A.playbackGain(0.9, 2), 2);
+  assert.strictEqual(A.playbackGain(0.45, 2), 4);
+  assert.strictEqual(A.playbackGain(0.05, 3), 12);
+  assert.strictEqual(A.playbackGain(0, 2), 2);
+  assert.strictEqual(A.playbackGain(1.2, 1.5), 1.5);
+});
 console.log(`\n${passed} tests passed`);

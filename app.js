@@ -7,7 +7,7 @@
   var CATS = window.SPEAK_CATEGORIES, GOALS = window.SPEAK_GOALS, CAT_TAGS = window.SPEAK_CATEGORY_TAGS;
   var CAT_ORDER = ['meeting', 'smalltalk', 'request', 'opinion', 'schedule', 'reaction', 'followup', 'daily', 'travel', 'interview'];
   var KEY = 'speakapp.v2', V1_KEY = 'speakapp.v1';
-  var APP_VERSION = '2.0.0';
+  var APP_VERSION = '2.1.0';
   var SCHED = { learningSteps: [], relearningSteps: [], graduatingInterval: 2, dayStartHour: 4 };
   var GRADE_LABEL = { 1: '다시', 2: '어려움', 3: '좋음', 4: '쉬움' };
   var LEVELS = { beginner: '초급', intermediate: '중급', upper: '중상급' };
@@ -18,7 +18,7 @@
   /* ======================= 저장소 ======================= */
   function defaultSettings() {
     return { rate: 1.0, accent: 'us', voiceURI: '', koHints: true, scriptDefault: true, useWebSpeech: true, provider: 'gemini', models: {},
-      newPerDay: 5, maxReviews: 100, latencyThreshold: 3.5, autoPlay: true };
+      newPerDay: 5, maxReviews: 100, latencyThreshold: 3.5, autoPlay: true, playBoost: 2, aiVoice: false };
   }
   function freshDb() {
     return {
@@ -68,7 +68,10 @@
   }
   var db = load();
   save();
-  function applyAIConfig() { AI.configure({ provider: db.settings.provider, models: db.settings.models || {} }); }
+  function applyAIConfig() {
+    AI.configure({ provider: db.settings.provider, models: db.settings.models || {}, onStatus: function (m) { toast(m); } });
+    Media.setBoost(db.settings.playBoost);
+  }
   applyAIConfig();
 
   function card(id) { for (var i = 0; i < db.cards.length; i++) if (db.cards[i].id === id) return db.cards[i]; return null; }
@@ -138,10 +141,54 @@
     for (var i = 0; i < prefs.length; i++) { var m = loc.filter(function (v) { return v.name.indexOf(prefs[i]) >= 0; })[0]; if (m) return m; }
     return loc[0] || voices[0] || null;
   }
-  var speakToken = 0;
-  function speak(text, rate) {
-    if (!hasTTS) { toast('이 브라우저는 음성 재생을 지원하지 않아요'); return Promise.resolve(); }
+  var speakToken = 0, aiVoiceCooldown = 0, ttsInflight = {};
+  function aiVoiceOn() { return !!db.settings.aiVoice && AI.ttsAvailable() && Date.now() > aiVoiceCooldown; }
+  /**
+   * 영어 문장 재생. 기본은 기기 음성(speechSynthesis).
+   * opt.ai: 설정에서 AI 음성을 켰으면 Gemini TTS(기기에 캐시) — 쉐도잉 음원·소리 테스트에만 사용.
+   * 실측(2026-09, 무료 등급): TTS는 1분에 3문장 한도 + 문장당 1.7~5초 → 롤플레이 턴·복습 문장처럼 매번 새 문장인 곳엔 부적합.
+   */
+  function speak(text, rate, opt) {
     var my = ++speakToken;
+    Media.stop();
+    Media.prepPlayback(); // 마이크가 남아 있으면 끄고 재생 모드로 → iOS에서 수화부로 작게 나오는 문제 방지
+    if (hasTTS) try { window.speechSynthesis.cancel(); } catch (e) { /* noop */ }
+    if (opt && opt.ai && aiVoiceOn()) {
+      return aiSpeak(text, rate || db.settings.rate, my).then(function (fresh) { return fresh; }, function (err) {
+        if (my !== speakToken) return false;
+        if (err && err.kind === 'quota') { aiVoiceCooldown = Date.now() + 60000; toast('AI 음성 한도 — 1분 동안 기기 음성으로 재생해요'); }
+        return webSpeak(text, rate, my);
+      });
+    }
+    return webSpeak(text, rate, my);
+  }
+  function ttsId(text, rate) { return [db.settings.accent, rate <= 0.85 ? 'slow' : rate > 1.15 ? 'fast' : 'normal', text.trim()].join('|'); }
+  /** 캐시에 있으면 그대로, 없으면 한 번만 생성(같은 문장 동시 요청은 합침) */
+  function ttsBlob(text, rate) {
+    var id = ttsId(text, rate);
+    if (ttsInflight[id]) return ttsInflight[id];
+    var pr = Media.TTSCache.get(id).then(function (blob) {
+      if (blob) return blob;
+      return AI.tts(text, { rate: rate, accent: db.settings.accent }).then(function (b) { Media.TTSCache.put(id, b); return b; });
+    });
+    ttsInflight[id] = pr;
+    var clear = function () { delete ttsInflight[id]; };
+    pr.then(clear, clear);
+    return pr;
+  }
+  /** 오늘 쉐도잉 클립을 미리 만들어 둠(순서대로, 한도에 걸리면 멈춤) → 첫 재생도 바로 */
+  function prefetchVoices(texts, rate) {
+    if (!aiVoiceOn()) return;
+    texts.reduce(function (p, t) { return p.then(function () { if (aiVoiceOn()) return ttsBlob(t, rate); }); }, Promise.resolve()).catch(function (e) { if (e && e.kind === 'quota') aiVoiceCooldown = Date.now() + 60000; });
+  }
+  function aiSpeak(text, rate, my) {
+    return ttsBlob(text, rate).then(function (blob) {
+      if (my !== speakToken) return false;
+      return Media.playBlob(blob).then(function () { return my === speakToken; });
+    });
+  }
+  function webSpeak(text, rate, my) {
+    if (!hasTTS) { toast('이 브라우저는 음성 재생을 지원하지 않아요'); return Promise.resolve(); }
     return new Promise(function (resolve) {
       var done = false;
       function fin() { if (!done) { done = true; resolve(my === speakToken); } }
@@ -150,6 +197,7 @@
         var u = new SpeechSynthesisUtterance(text);
         u.lang = db.settings.accent === 'uk' ? 'en-GB' : 'en-US';
         var v = pickVoice(); if (v) u.voice = v;
+        u.volume = 1; // 항상 최대 (기기 볼륨으로 조절)
         u.rate = rate || db.settings.rate;
         u.onend = fin; u.onerror = fin;
         window.speechSynthesis.speak(u);
@@ -157,7 +205,7 @@
       } catch (e) { fin(); }
     });
   }
-  function stopSpeaking() { speakToken++; if (hasTTS) try { window.speechSynthesis.cancel(); } catch (e) { /* noop */ } }
+  function stopSpeaking() { speakToken++; Media.stop(); if (hasTTS) try { window.speechSynthesis.cancel(); } catch (e) { /* noop */ } }
 
   /* ======================= 브라우저 음성 인식 (대체 수단) ======================= */
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -216,7 +264,7 @@
       document.body.appendChild(ov);
       $('#micOk', ov).onclick = function () {
         db.profile.micExplained = true; save(); ov.remove();
-        if (Media.supported()) Media.getStream().then(function () { resolve(true); }, function () { toast('마이크 권한이 없어요. 브라우저 설정에서 허용해 주세요.'); resolve(false); });
+        if (Media.supported()) Media.getStream().then(function () { Media.release(); resolve(true); }, function () { toast('마이크 권한이 없어요. 브라우저 설정에서 허용해 주세요.'); resolve(false); });
         else resolve(true);
       };
       $('#micNo', ov).onclick = function () { ov.remove(); resolve(false); };
@@ -543,6 +591,8 @@
   var shadowCtx = null;
   function renderShadowStep(r) {
     var clips = routineClips(r);
+    var pfKey = r.date + ':' + (r.plan.clipIds || []).join(',');
+    if (db.settings.aiVoice && ui.prefetchFor !== pfKey) { ui.prefetchFor = pfKey; prefetchVoices(clips.map(function (c) { return c.script; }), db.settings.rate); }
     shadowCtx = {
       state: r.shadow, clips: clips, reps: r.plan.reps, header: routineHeader(r), lastLabel: '쉐도잉 끝 → 말하기',
       onChange: saveRoutine,
@@ -685,6 +735,12 @@
       '</div></div>');
     var chat = $('#chat'); if (chat) chat.scrollTop = chat.scrollHeight;
     if (ui.busy) { var mb = $('[data-act="rp-rec"]'); if (mb) mb.disabled = true; }
+    // 앱이 AI 답을 기다리는 중에 닫혔다가 다시 열린 경우: 마지막이 내 말이면 상대 답을 한 번 자동으로 다시 요청
+    var last = s.turns[s.turns.length - 1];
+    if (last && last.who === 'me' && !s.ended && !ui.thinking && !ui.busy && !ui.aiErr && !ui.recording && ui.rpResumed !== s.id) {
+      ui.rpResumed = s.id; ui.rp = s.id;
+      setTimeout(function () { if (currentRoutine() === r && !ui.thinking) rpAsk(s); }, 0);
+    }
   }
   function rpSpeakLast(s) {
     var t = s.turns[s.turns.length - 1];
@@ -852,7 +908,7 @@
       return AI.feedback({ task: ctx.task, utterances: ctx.utterances, level: db.profile.level, transcriptLabel: ctx.transcriptLabel }).then(function (d) {
         var items = d.items.length ? d.items : [F.fallbackItem(ctx.utterances)].filter(Boolean);
         fb.items = items; fb.comprehensible = d.comprehensible; fb.on_topic = d.on_topic;
-        fb.repairAsked = !d.on_topic && !!d.repair_question; fb.repairQ = d.repair_question;
+        fb.repairAsked = F.needsRepair(d); fb.repairQ = d.repair_question; // 주제 이탈 또는 뜻이 안 통함 → 확인 질문 먼저
         items.forEach(function (it) { if (it.original !== it.improved) db.errors = E.add(db.errors, it, now()); });
         if (db.errors.length > 200) db.errors = db.errors.slice(-200);
         fb.status = 'ready'; fb.idx = 0; save();
@@ -934,7 +990,12 @@
       add(it.improved, c0 ? c0.ko : it.self ? '오늘 셀프 교정 문장' : '내가 했던 말 “' + it.original + '”를 자연스럽게');
     });
     var s = session(r.output.sessionId);
-    if (s && s.kind === 'roleplay') { var sc = scenario(s.scenarioId); (sc.must_use_chunk || []).forEach(function (x) { var c = cardByText(x); add(x, c ? c.ko : '(' + sc.title + ') 상황에서'); }); add(sc.hint, '(' + sc.title + ') 상황에서'); }
+    if (s && s.kind === 'roleplay') { var sc = scenario(s.scenarioId); (sc.must_use_chunk || []).forEach(function (x) {
+      var c = cardByText(x);
+      if (c) return add(c.en, c.ko);
+      if (sc.hint && T.containsChunk(sc.hint, x, 0.85)) return; // 'work for you' 같은 조각 대신 완전한 힌트 문장을 저장
+      add(x, '(' + sc.title + ') 상황에서');
+    }); add(sc.hint, '(' + sc.title + ') 상황에서'); }
     if (r.plan.warmup) add(r.plan.warmup.script, r.plan.warmup.kind === 'error' ? '지난번 교정: “' + r.plan.warmup.original + '”' : '');
     db.cards.filter(function (c) { return c.srs.state === 'new' && cardTags(c).indexOf(db.profile.goal) >= 0; }).slice(0, 5).forEach(function (c) { add(c.en, c.ko); });
     return out;
@@ -1261,6 +1322,9 @@
         '<label class="inline">기본 속도' + sel('rate', RATES, st.rate, RATES.map(function (x) { return x.toFixed(1) + '×'; })) + '</label>' +
         '<label>목소리<select data-set="voiceURI"><option value="">자동 (' + (st.accent === 'uk' ? 'en-GB' : 'en-US') + ' 우선)</option>' + vlist.map(function (v) { return '<option value="' + esc(v.voiceURI) + '"' + (st.voiceURI === v.voiceURI ? ' selected' : '') + '>' + esc(v.name + ' (' + v.lang + ')') + '</option>'; }).join('') + '</select></label>' +
         '<button class="btn ghost" data-act="tts-test">🔊 테스트</button>' +
+        '<label class="inline">녹음 재생 볼륨 부스트' + sel('playBoost', [1, 1.5, 2, 3], st.playBoost, ['1× (원음)', '1.5×', '2× (기본)', '3×']) + '</label>' +
+        '<label class="switch"><input type="checkbox" data-set="aiVoice"' + (st.aiVoice ? ' checked' : '') + (AI.ttsAvailable() ? '' : ' disabled') + '> 쉐도잉 음원을 AI 음성으로 (Gemini TTS) <span class="muted small">— 더 자연스럽고 큰 소리. ' + (AI.ttsAvailable() ? '오늘 클립을 미리 만들어 이 기기에 저장해요(문장당 2~5초). 무료 등급은 1분에 3문장까지라 롤플레이·복습은 기기 음성을 쓰고, 한도를 넘으면 잠시 기기 음성으로 바뀌어요.' : 'Gemini 키를 넣으면 켤 수 있어요.') + '</span></label>' +
+        '<div class="notice">💡 소리가 작으면 폰 볼륨 버튼을 재생 중에 올려보세요 (아이폰은 무음 스위치도 확인)</div>' +
         '<label class="switch"><input type="checkbox" data-set="useWebSpeech"' + (st.useWebSpeech ? ' checked' : '') + '> AI 키가 없을 때 브라우저 음성 인식 사용 <span class="muted small">(' + (SR ? (recogBroken ? '⚠️ ' + recogBrokenReason : '지원됨') : '미지원') + ')</span></label>' +
       '</section>' +
       '<section class="card form" id="ai"><h2>AI (롤플레이 · 피드백 · 받아쓰기)</h2>' +
@@ -1291,11 +1355,11 @@
         var val = el.type === 'checkbox' ? el.checked : el.value;
         if (/^p\./.test(k)) { k = k.slice(2); db.profile[k] = k === 'minutes' ? Number(val) : val; }
         else {
-          if (['rate', 'newPerDay'].indexOf(k) >= 0) val = Number(val);
+          if (['rate', 'newPerDay', 'playBoost'].indexOf(k) >= 0) val = Number(val);
           db.settings[k] = val;
           if (k === 'useWebSpeech' && val) { recogBroken = false; recogBrokenReason = ''; }
           if (k === 'accent') db.settings.voiceURI = '';
-          if (k === 'provider') applyAIConfig();
+          if (k === 'provider' || k === 'playBoost') applyAIConfig();
         }
         save(); toast('저장했어요');
         if (k === 'provider' || k === 'accent') renderSettings();
@@ -1407,14 +1471,14 @@
     /* 루틴 */
     'leave-routine': leaveRoutine,
     rate: function (el) { db.settings.rate = Number(el.getAttribute('data-v')); save(); if (shadowCtx) shadowCtx.rerender(); },
-    'sh-play': function () { var c = shadowCtx.clips[shadowCtx.state.idx]; speak(c.script, db.settings.rate); },
+    'sh-play': function () { var c = shadowCtx.clips[shadowCtx.state.idx]; speak(c.script, db.settings.rate, { ai: true }); },
     'sh-mine': function () { var id = shadowCtx.state.recIds[shadowCtx.state.idx]; if (id) playRec(id); },
     'sh-toggle': function () { if (shadowCtx.state.mode === 'solo') ui.peek = !ui.peek; else ui.showScript = !ui.showScript; shadowCtx.rerender(); },
     'sh-next-mode': shNextMode,
     'sh-rep': function () {
       var st = shadowCtx.state, c = shadowCtx.clips[st.idx];
       var btn = $('[data-act="sh-rep"]'); if (btn) btn.disabled = true;
-      speak(c.script, db.settings.rate).then(function () { st.reps = Math.min(shadowCtx.reps, st.reps + 1); shadowCtx.onChange(); shadowCtx.rerender(); });
+      speak(c.script, db.settings.rate, { ai: true }).then(function () { st.reps = Math.min(shadowCtx.reps, st.reps + 1); shadowCtx.onChange(); shadowCtx.rerender(); });
     },
     'sh-rec': shRec,
     'sh-rerec': function () { var st = shadowCtx.state; st.mode = 'solo'; ui.recMeta = null; shadowCtx.onChange(); shadowCtx.rerender(); },
@@ -1488,7 +1552,7 @@
       if (i >= 0) t.splice(i, 1); else if (t.length < 3) t.push(v); else { toast('최대 3개까지 고를 수 있어요'); return; }
       save(); renderSettings();
     },
-    'tts-test': function () { speak('Let me check my schedule and get back to you.'); },
+    'tts-test': function () { speak('Let me check my schedule and get back to you.', db.settings.rate, { ai: true }); },
     'key-save': function () { var v = ($('#aiKey') || {}).value || ''; AI.setKey(AI.provider(), v.trim()); toast(v.trim() ? '키를 이 기기에 저장했어요' : '키를 지웠어요'); renderSettings('ai'); },
     'key-del': function () { AI.setKey(AI.provider(), ''); toast('키를 지웠어요'); renderSettings('ai'); },
     'key-test': function (el) {
@@ -1515,7 +1579,7 @@
       var el = e.target.closest('[data-act]');
       if (!el || el.disabled) return;
       var fn = ACTIONS[el.getAttribute('data-act')];
-      if (fn) { e.preventDefault(); fn(el); }
+      if (fn) { e.preventDefault(); Media.unlock(); fn(el); } // 탭 안에서 재생용 AudioContext 깨우기(iOS)
     });
     window.addEventListener('hashchange', route);
     window.addEventListener('pagehide', function () { cancelCapture(); save(); });
