@@ -8,9 +8,18 @@ window.SPEAK_CATEGORIES = {
   followup: '이메일/통화 후속',
   reaction: '감정·반응',
   daily: '일상 필수',
+  travel: '여행',
+  interview: '면접',
   custom: '나의 표현'
 };
-window.SPEAK_SEED_VERSION = 1;
+/* 목표 태그: 일상(daily) / 업무(work) / 여행(travel) / 면접(interview) */
+window.SPEAK_GOALS = { daily: '일상', work: '업무', travel: '여행', interview: '면접' };
+window.SPEAK_CATEGORY_TAGS = {
+  meeting: ['work'], opinion: ['work', 'daily'], request: ['work', 'daily'], schedule: ['work'],
+  smalltalk: ['daily', 'work'], followup: ['work'], reaction: ['daily'], daily: ['daily', 'travel'],
+  travel: ['travel'], interview: ['interview'], custom: ['daily']
+};
+window.SPEAK_SEED_VERSION = 2;
 window.SPEAK_SEED = [
   // 회의
   { id: 'mt01', category: 'meeting', en: "Let me make sure I understand this correctly.",
@@ -186,5 +195,70 @@ window.SPEAK_SEED = [
   { id: 'dl05', category: 'daily', en: "How do you say that in English?",
     ko: "(영어 표현이 떠오르지 않을 때) 그걸 영어로 뭐라고 하죠?",
     example: "It's like a... how do you say that in English? A company dinner?",
-    slot: "How do you say ___ in English?" }
+    slot: "How do you say ___ in English?" },
+  // ===== v2 추가 60개 =====
+  // 여행
+  { id: 'tv01', category: 'travel', en: "I'd like to check in, please.", ko: "(호텔 프런트에서) 체크인하려고요", example: "Hi, I'd like to check in, please. The reservation is under Kim.", slot: "I'd like to ___, please." },
+  { id: 'tv02', category: 'travel', en: "Could I get a window seat?", ko: "(비행기·기차 좌석) 창가 자리로 받을 수 있을까요?", example: "Could I get a window seat, if there's one left?", slot: "Could I get ___?" },
+  { id: 'tv03', category: 'travel', en: "How do I get to the station from here?", ko: "(길 물을 때) 여기서 역까지 어떻게 가요?", example: "Excuse me, how do I get to the station from here?", slot: "How do I get to ___ from here?" },
+  { id: 'tv04', category: 'travel', en: "Is it within walking distance?", ko: "(거리를 물을 때) 걸어갈 만한 거리예요?", example: "The museum? Is it within walking distance, or should I take a bus?", slot: "Is ___ within walking distance?" },
+  { id: 'tv05', category: 'travel', en: "Can I get this to go?", ko: "(카페·식당에서 포장) 이거 포장해 갈 수 있어요?", example: "Actually, can I get this to go? I'm in a bit of a hurry.", slot: "Can I get ___ to go?" },
+  { id: 'tv06', category: 'travel', en: "I'll have the same, please.", ko: "(일행과 같은 걸 주문할 때) 저도 같은 걸로 할게요", example: "That sounds good. I'll have the same, please.", slot: "I'll have ___, please." },
+  { id: 'tv07', category: 'travel', en: "Could we get the check, please?", ko: "(식당에서 계산할 때) 계산서 좀 주시겠어요?", example: "Excuse me, could we get the check, please?", slot: "Could we get ___, please?" },
+  { id: 'tv08', category: 'travel', en: "Do you take credit cards?", ko: "(결제 방법을 물을 때) 카드 되나요?", example: "Do you take credit cards? I don't have any cash on me.", slot: "Do you take ___?" },
+  { id: 'tv09', category: 'travel', en: "I think there's a mistake on the bill.", ko: "(계산서가 이상할 때) 계산서에 뭔가 잘못된 것 같아요", example: "Sorry, I think there's a mistake on the bill. We only had two coffees.", slot: "I think there's a mistake on ___." },
+  { id: 'tv10', category: 'travel', en: "My luggage didn't show up.", ko: "(수하물이 안 나왔을 때) 제 짐이 안 나왔어요", example: "Hi, my luggage didn't show up. Where can I report it?", slot: "My ___ didn't show up." },
+  { id: 'tv11', category: 'travel', en: "What time is checkout?", ko: "(호텔에서) 체크아웃이 몇 시예요?", example: "What time is checkout? Could we leave our bags here after that?", slot: "What time is ___?" },
+  { id: 'tv12', category: 'travel', en: "Could you recommend a good place to eat around here?", ko: "(현지인에게) 이 근처 괜찮은 식당 추천해 주실래요?", example: "Could you recommend a good place to eat around here? Nothing too fancy.", slot: "Could you recommend ___ around here?" },
+  { id: 'tv13', category: 'travel', en: "I'm just looking, thanks.", ko: "(가게 점원이 말을 걸 때) 그냥 구경하는 중이에요, 고마워요", example: "Oh, I'm just looking, thanks. I'll let you know if I need anything.", slot: "I'm just ___, thanks." },
+  { id: 'tv14', category: 'travel', en: "Do you have this in a smaller size?", ko: "(옷 가게에서) 이거 더 작은 사이즈 있어요?", example: "I like this one. Do you have this in a smaller size?", slot: "Do you have this in ___?" },
+  { id: 'tv15', category: 'travel', en: "I'm here on vacation.", ko: "(입국 심사·대화에서) 휴가차 왔어요", example: "I'm here on vacation for a week. It's my first time in Canada.", slot: "I'm here for ___." },
+  { id: 'tv16', category: 'travel', en: "Could you take a picture of us?", ko: "(관광지에서) 저희 사진 좀 찍어 주실래요?", example: "Excuse me, could you take a picture of us? Just press this button.", slot: "Could you ___ for us?" },
+  { id: 'tv17', category: 'travel', en: "Is this seat taken?", ko: "(빈자리인지 물을 때) 여기 자리 있어요?", example: "Sorry, is this seat taken? Mind if I sit here?", slot: "Is this ___ taken?" },
+  { id: 'tv18', category: 'travel', en: "Which stop should I get off at?", ko: "(버스·지하철에서) 어느 정류장에서 내려야 해요?", example: "Which stop should I get off at for the museum?", slot: "Which stop should I get off at for ___?" },
+  { id: 'tv19', category: 'travel', en: "I'd like to make a reservation for two.", ko: "(식당 예약) 두 명 예약하고 싶어요", example: "Hi, I'd like to make a reservation for two at seven tonight.", slot: "I'd like to make a reservation for ___." },
+  { id: 'tv20', category: 'travel', en: "Sorry, I'm not from around here.", ko: "(누가 길을 물을 때) 죄송해요, 저도 이 동네 사람이 아니라서요", example: "Sorry, I'm not from around here. Maybe ask at the station?", slot: "Sorry, I'm not ___." },
+  // 면접
+  { id: 'iv01', category: 'interview', en: "I've been working in marketing for about five years.", ko: "(경력 소개) 마케팅 분야에서 5년 정도 일해 왔어요", example: "I've been working in marketing for about five years, mostly in retail.", slot: "I've been working in ___ for about ___ years." },
+  { id: 'iv02', category: 'interview', en: "I'm currently responsible for our team's budget.", ko: "(현재 업무) 지금은 팀 예산을 맡고 있어요", example: "I'm currently responsible for our team's budget and vendor contracts.", slot: "I'm currently responsible for ___." },
+  { id: 'iv03', category: 'interview', en: "One of my strengths is that I'm a quick learner.", ko: "(강점을 말할 때) 제 강점 중 하나는 빨리 배운다는 거예요", example: "One of my strengths is that I'm a quick learner. I picked up our new system in two weeks.", slot: "One of my strengths is that I ___." },
+  { id: 'iv04', category: 'interview', en: "I'm working on being more patient.", ko: "(약점을 말할 때) 좀 더 인내심을 가지려고 노력 중이에요", example: "I tend to rush things, so I'm working on being more patient.", slot: "I'm working on ___." },
+  { id: 'iv05', category: 'interview', en: "That's a good question. Let me think for a second.", ko: "(시간을 벌 때) 좋은 질문이네요. 잠깐 생각해 볼게요", example: "That's a good question. Let me think for a second... I'd say teamwork.", slot: "That's a good question. Let me ___." },
+  { id: 'iv06', category: 'interview', en: "In my previous role, I led a team of six.", ko: "(이전 경험) 이전 직무에서 여섯 명 팀을 이끌었어요", example: "In my previous role, I led a team of six and managed two big projects.", slot: "In my previous role, I ___." },
+  { id: 'iv07', category: 'interview', en: "What I enjoy most about my job is working with people.", ko: "(일에서 좋아하는 점) 제 일에서 제일 좋은 건 사람들과 일하는 거예요", example: "What I enjoy most about my job is working with people from different teams.", slot: "What I enjoy most about my job is ___." },
+  { id: 'iv08', category: 'interview', en: "I'm looking for a role where I can grow.", ko: "(지원 동기) 성장할 수 있는 자리를 찾고 있어요", example: "I'm looking for a role where I can grow and take on more responsibility.", slot: "I'm looking for a role where I can ___." },
+  { id: 'iv09', category: 'interview', en: "For example, last year we cut costs by twenty percent.", ko: "(구체적인 예를 들 때) 예를 들어, 작년에 비용을 20% 줄였어요", example: "For example, last year we cut costs by twenty percent without losing quality.", slot: "For example, last year we ___." },
+  { id: 'iv10', category: 'interview', en: "I handled it by talking to each person one-on-one.", ko: "(문제 해결 방법) 한 명씩 따로 이야기해서 해결했어요", example: "There was some tension on the team, and I handled it by talking to each person one-on-one.", slot: "I handled it by ___." },
+  { id: 'iv11', category: 'interview', en: "I'd say I'm organized and easy to work with.", ko: "(나를 묘사할 때) 저는 체계적이고 같이 일하기 편한 사람이라고 생각해요", example: "My coworkers? I think they'd say I'm organized and easy to work with.", slot: "I'd say I'm ___ and ___." },
+  { id: 'iv12', category: 'interview', en: "Could you tell me a bit more about the team?", ko: "(면접관에게 질문할 때) 팀에 대해 조금 더 알려 주실 수 있을까요?", example: "Could you tell me a bit more about the team I'd be working with?", slot: "Could you tell me a bit more about ___?" },
+  { id: 'iv13', category: 'interview', en: "I'm really excited about this opportunity.", ko: "(면접을 마무리할 때) 이번 기회가 정말 기대돼요", example: "Thank you for your time. I'm really excited about this opportunity.", slot: "I'm really excited about ___." },
+  { id: 'iv14', category: 'interview', en: "The biggest challenge was the tight deadline.", ko: "(어려웠던 점) 가장 큰 어려움은 빠듯한 마감이었어요", example: "The biggest challenge was the tight deadline. We had only three weeks.", slot: "The biggest challenge was ___." },
+  { id: 'iv15', category: 'interview', en: "I learned a lot from that experience.", ko: "(경험에서 배운 점) 그 경험에서 많이 배웠어요", example: "It didn't go perfectly, but I learned a lot from that experience.", slot: "From that experience, I learned ___." },
+  // 일상
+  { id: 'dl06', category: 'daily', en: "Let me think for a second.", ko: "(바로 답이 안 나올 때) 잠깐 생각 좀 해 볼게요", example: "My favorite food? Let me think for a second... probably kimchi stew.", slot: "Let me think for a second. I'd say ___." },
+  { id: 'dl07', category: 'daily', en: "It depends on the situation.", ko: "(상황에 따라 다를 때) 상황에 따라 달라요", example: "Do I drive to work? It depends on the situation. If it rains, I drive.", slot: "It depends on the situation. If ___, I ___." },
+  { id: 'dl08', category: 'daily', en: "I'd like to make an appointment.", ko: "(병원·미용실 예약할 때) 예약하고 싶어요", example: "Hi, I'd like to make an appointment for a haircut on Saturday.", slot: "I'd like to make an appointment for ___." },
+  { id: 'dl09', category: 'daily', en: "What do you call it... the thing you use to open cans?", ko: "(단어가 생각 안 날 때 돌려 말하기) 그거 뭐라고 하죠… 캔 따는 거요", example: "I need a... what do you call it... the thing you use to open cans?", slot: "What do you call it... the thing you use to ___?" },
+  { id: 'dl10', category: 'smalltalk', en: "I'm not a big fan of spicy food.", ko: "(취향을 말할 때) 매운 음식은 별로 안 좋아해요", example: "I'm not a big fan of spicy food, so I'll get the mild one.", slot: "I'm not a big fan of ___." },
+  { id: 'dl11', category: 'smalltalk', en: "I've been meaning to try that place.", ko: "(가 보려던 곳) 거기 가 보려고 계속 생각만 하고 있었어요", example: "Oh, the new taco place? I've been meaning to try that place.", slot: "I've been meaning to ___." },
+  { id: 'dl12', category: 'smalltalk', en: "I usually just stay in on weekends.", ko: "(주말 습관) 주말엔 보통 그냥 집에 있어요", example: "I usually just stay in on weekends and catch up on sleep.", slot: "I usually just ___ on weekends." },
+  { id: 'dl13', category: 'daily', en: "I'm thinking about taking a few days off.", ko: "(계획을 말할 때) 며칠 쉬려고 생각 중이에요", example: "I'm thinking about taking a few days off next month.", slot: "I'm thinking about ___." },
+  { id: 'dl14', category: 'daily', en: "That's not what I meant.", ko: "(오해를 바로잡을 때) 제 말은 그런 뜻이 아니었어요", example: "No, no, that's not what I meant. I meant next Friday.", slot: "That's not what I meant. I meant ___." },
+  { id: 'dl15', category: 'daily', en: "Do you mean the one on the left?", ko: "(내가 이해한 게 맞는지 확인할 때) 왼쪽에 있는 거 말하는 거예요?", example: "The blue folder? Do you mean the one on the left?", slot: "Do you mean ___?" },
+  { id: 'dl16', category: 'daily', en: "Got it. Thanks for explaining.", ko: "(이해했을 때) 알겠어요. 설명해 줘서 고마워요", example: "Ah, got it. Thanks for explaining. That makes it much clearer.", slot: "Got it. Thanks for ___." },
+  { id: 'dl17', category: 'daily', en: "Could you speak a little slower?", ko: "(말이 빨라서 못 알아들을 때) 조금만 천천히 말해 주실래요?", example: "Sorry, I didn't catch that. Could you speak a little slower?", slot: "Could you speak a little ___?" },
+  { id: 're06', category: 'reaction', en: "Oh no, that's too bad.", ko: "(안 좋은 소식에) 저런, 안됐네요", example: "Your trip got canceled? Oh no, that's too bad.", slot: "Oh no, that's too bad. Is ___ okay?" },
+  { id: 're07', category: 'reaction', en: "Good for you!", ko: "(상대에게 좋은 일이 있을 때) 잘됐네요!", example: "You got the promotion? Good for you!", slot: "Good for you! You must be ___." },
+  { id: 're08', category: 'reaction', en: "I can't believe it's already Friday.", ko: "(시간이 빨리 갈 때) 벌써 금요일이라니 믿기지 않아요", example: "I can't believe it's already Friday. This week flew by.", slot: "I can't believe ___." },
+  // 업무
+  { id: 'mt06', category: 'meeting', en: "Could we go over the numbers one more time?", ko: "(회의에서 다시 확인할 때) 수치를 한 번 더 같이 볼 수 있을까요?", example: "Sorry, could we go over the numbers one more time? I want to be sure.", slot: "Could we go over ___ one more time?" },
+  { id: 'mt07', category: 'meeting', en: "I'd like to add something to that.", ko: "(의견을 덧붙일 때) 거기에 하나 덧붙이고 싶어요", example: "I'd like to add something to that. We also need to think about the cost.", slot: "I'd like to add that ___." },
+  { id: 'mt08', category: 'meeting', en: "Let's take this offline.", ko: "(회의 후 따로 이야기하자고 할 때) 이건 회의 끝나고 따로 얘기해요", example: "This is getting too detailed. Let's take this offline.", slot: "Let's take ___ offline." },
+  { id: 'op06', category: 'opinion', en: "I partly agree with you.", ko: "(부분적으로 동의할 때) 부분적으로는 동의해요", example: "I partly agree with you, but I think the timing is wrong.", slot: "I partly agree, but ___." },
+  { id: 'op07', category: 'schedule', en: "I'm afraid I can't make it.", ko: "(약속을 정중하게 거절할 때) 죄송하지만 못 갈 것 같아요", example: "Friday night? I'm afraid I can't make it. I already have plans.", slot: "I'm afraid I can't ___." },
+  { id: 'rq06', category: 'request', en: "I'll have to pass this time.", ko: "(제안을 거절할 때) 이번엔 빠질게요", example: "Thanks for asking, but I'll have to pass this time.", slot: "Thanks, but I'll have to pass on ___." },
+  { id: 'fu06', category: 'followup', en: "I'll send you the details by email.", ko: "(통화를 마무리할 때) 자세한 내용은 메일로 보내 드릴게요", example: "Great talking to you. I'll send you the details by email.", slot: "I'll send you ___ by email." },
+  { id: 'fu07', category: 'followup', en: "Just wanted to give you a quick update.", ko: "(진행 상황을 공유할 때) 간단히 진행 상황 알려 드리려고요", example: "Hi Sarah, just wanted to give you a quick update on the project.", slot: "Just wanted to give you a quick update on ___." },
+  { id: 'sc06', category: 'schedule', en: "Would it be possible to move it to next week?", ko: "(일정 변경을 요청할 때) 다음 주로 옮길 수 있을까요?", example: "Something came up. Would it be possible to move it to next week?", slot: "Would it be possible to move ___ to ___?" },
+  { id: 'rq07', category: 'request', en: "Sorry for the delay. I was stuck in meetings all morning.", ko: "(늦어서 사과하며 이유를 말할 때) 늦어서 죄송해요. 오전 내내 회의에 붙잡혀 있었어요", example: "Sorry for the delay. I was stuck in meetings all morning. Here's the file.", slot: "Sorry for the delay. I was ___." }
 ];

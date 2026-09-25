@@ -66,6 +66,10 @@
 
     if (s.state === 'new' || s.state === 'learning') {
       var steps = o.learningSteps;
+      if (!steps.length) { // v2: 단계 없이 바로 날짜 간격 (실패·어려움 → 다음 날)
+        graduate(s, grade <= 2 ? 1 : grade === 3 ? o.graduatingInterval : o.easyInterval, now, o);
+        return s;
+      }
       if (s.state === 'new') { s.state = 'learning'; s.step = 0; }
       if (grade === 1) {
         s.step = 0;
@@ -85,6 +89,7 @@
 
     if (s.state === 'relearning') {
       var rs = o.relearningSteps;
+      if (!rs.length) { graduate(s, grade === 1 ? 1 : grade === 2 ? Math.max(1, s.interval || 1) : Math.max(1, s.interval || 1) + (grade === 4 ? 2 : 1), now, o); return s; }
       if (grade === 1) { s.step = 0; s.due = now + rs[0] * MIN; }
       else if (grade === 2) { s.due = now + rs[Math.min(s.step, rs.length - 1)] * MIN * 1.5; }
       else if (grade === 3) {
@@ -105,6 +110,7 @@
       s.lapses = (s.lapses || 0) + 1;
       s.ease = Math.max(o.minEase, s.ease - 0.2);
       s.interval = Math.max(1, round(ivl * o.lapseFactor));
+      if (!o.relearningSteps.length) { graduate(s, 1, now, o); s.interval = 1; return s; }
       s.state = 'relearning';
       s.step = 0;
       s.due = now + o.relearningSteps[0] * MIN;
@@ -297,10 +303,285 @@
     return out;
   }
 
+
+  /* ---------------- v2: 빈칸(첫 글자 힌트) ---------------- */
+  function cloze(en) {
+    return splitRaw(en).map(function (raw) {
+      return raw.replace(/[A-Za-z][A-Za-z']*/g, function (w) {
+        if (w.length <= 1) return w;
+        return w[0] + w.slice(1).replace(/[A-Za-z]/g, '_');
+      });
+    }).join(' ');
+  }
+
+  /* ---------------- v2: 날짜·주간·스트릭 ---------------- */
+  function weekStart(now, hour) {
+    var d = new Date(studyDayStart(now, hour));
+    var dow = (d.getDay() + 6) % 7; // 월=0
+    d.setDate(d.getDate() - dow);
+    return d.getTime();
+  }
+  function weekKeys(now) {
+    var s = weekStart(now), out = [];
+    for (var i = 0; i < 7; i++) out.push(dayKey(addDays(s, i) + 1));
+    return out;
+  }
+  function isActiveDay(l) {
+    return !!l && ((l.spokenSec || 0) > 0 || (l.newCount || 0) + (l.reviewCount || 0) + (l.speed || 0) > 0 || !!l.bridged || !!l.routineDone);
+  }
+  /** 부드러운 스트릭: '어제 못 한 3분 워밍업'으로 메운 날(bridged)은 이어진 것으로 본다 */
+  function streak(log, now) {
+    var t = studyDayStart(now), n = 0;
+    if (!isActiveDay(log[dayKey(t)])) t = addDays(t, -1);
+    while (isActiveDay(log[dayKey(t)])) { n++; t = addDays(t, -1); }
+    return n;
+  }
+  function weekStats(log, now) {
+    var sec = 0, sessions = 0;
+    weekKeys(now).forEach(function (k) { var l = log[k]; if (l) { sec += l.spokenSec || 0; sessions += l.sessions || 0; } });
+    return { spokenSec: sec, spokenMin: Math.round(sec / 6) / 10, sessions: sessions };
+  }
+
+  /* ---------------- v2: 루틴 엔진 ---------------- */
+  var STEPS = ['shadow', 'output', 'feedback', 'chunks'];
+  var BASE_MIN = { shadow: 8, output: 8, feedback: 3, chunks: 1 }; // 20분 기준
+  function durations(minutes) {
+    var f = (minutes || 20) / 20, out = {};
+    STEPS.forEach(function (k) { out[k] = Math.round(BASE_MIN[k] * f * 10) / 10; });
+    return out;
+  }
+  /** 4-3-2 라운드 초: 초급 2→1.5→1분, 중급+ 4→3→2분. 10분 루틴은 비율대로 줄임 */
+  function fourThreeTwo(level, minutes) {
+    var base = level === 'beginner' ? [120, 90, 60] : [240, 180, 120];
+    var f = Math.min(1, (minutes || 20) / 20);
+    return base.map(function (x) { return Math.round(x * f); });
+  }
+  function routinePlan(p) {
+    var minutes = p.minutes || 20;
+    var clipsN = minutes <= 10 ? 2 : minutes <= 20 ? 3 : 5;
+    var reps = minutes <= 10 ? 3 : minutes <= 20 ? 4 : 5;
+    var turns = minutes <= 10 ? 3 : minutes <= 20 ? 4 : 6;
+    var pool = (p.clips || []).slice();
+    var lvl = { beginner: ['a2'], intermediate: ['a2', 'b1'], upper: ['b1', 'b2'] }[p.level || 'intermediate'] || ['a2', 'b1'];
+    var seen = p.seenClipIds || [];
+    function score(c) {
+      var sc = 0;
+      if ((p.topics || []).indexOf(c.tag) >= 0) sc += 4;
+      if (c.topic === (p.goal === 'work' ? 'work' : p.goal)) sc += 2;
+      if (lvl.indexOf(c.level) >= 0) sc += 3;
+      if (seen.indexOf(c.id) >= 0) sc -= 5;
+      return sc + ((p.rng || Math.random)() * 1.5);
+    }
+    pool.sort(function (a, b) { return score(b) - score(a); });
+    return {
+      minutes: minutes, durations: durations(minutes),
+      clipIds: pool.slice(0, clipsN).map(function (c) { return c.id; }),
+      reps: reps, turns: turns, rounds: fourThreeTwo(p.level, minutes),
+      warmup: p.warmup || null
+    };
+  }
+  function createRoutine(date, plan) {
+    return {
+      date: date, step: 'shadow', plan: plan, startedAt: null, completedAt: null,
+      shadow: { idx: 0, mode: 'listen', reps: 0, done: false, warmupDone: !plan.warmup, recIds: [] },
+      output: { type: null, sessionId: null, done: false },
+      feedback: { status: 'idle', items: [], idx: 0, reutter: [], repairAsked: false, repairDone: false, self: false, done: false },
+      chunks: { suggested: [], savedIds: [], done: false }
+    };
+  }
+  function stepIndex(step) { var i = STEPS.indexOf(step); return i < 0 ? STEPS.length : i; }
+  /** 단계 완료 시도. 조건 미충족이면 {ok:false, reason} */
+  function completeStep(r, step, now) {
+    var x = JSON.parse(JSON.stringify(r));
+    if (x.step !== step) return { ok: false, reason: 'not-current', routine: r };
+    if (step === 'output') {
+      if (!x.output.sessionId || !x.output.utterances) return { ok: false, reason: 'no-output', routine: r };
+    }
+    if (step === 'feedback') {
+      var items = x.feedback.items || [];
+      if (!items.length) return { ok: false, reason: 'no-items', routine: r };
+      var all = items.every(function (_, i) { return !!x.feedback.reutter[i]; });
+      if (!all) return { ok: false, reason: 'reutter-missing', routine: r };
+      if (x.feedback.repairAsked && !x.feedback.repairDone) return { ok: false, reason: 'repair-missing', routine: r };
+    }
+    if (step === 'chunks') {
+      if ((x.chunks.savedIds || []).length < 3) return { ok: false, reason: 'need-3-chunks', routine: r };
+    }
+    x[step].done = true;
+    var i = stepIndex(step);
+    x.step = i + 1 < STEPS.length ? STEPS[i + 1] : 'done';
+    if (x.step === 'done') x.completedAt = now || Date.now();
+    return { ok: true, routine: x };
+  }
+  function isRoutineComplete(r) {
+    return !!r && r.step === 'done' && r.output.done && r.feedback.done &&
+      (r.feedback.items || []).length > 0 && r.feedback.items.every(function (_, i) { return !!r.feedback.reutter[i]; }) &&
+      (r.chunks.savedIds || []).length >= 3;
+  }
+  function checklist(r) {
+    var out = {};
+    STEPS.forEach(function (k) { out[k] = !!(r && r[k] && r[k].done); });
+    return out;
+  }
+
+  /* ---------------- v2: 피드백 JSON ---------------- */
+  var LAYERS = ['meaning', 'naturalness', 'delivery'];
+  var SEVERITIES = ['low', 'medium', 'high'];
+  function parseJSONLoose(text) {
+    if (text && typeof text === 'object') return text;
+    if (typeof text !== 'string') return null;
+    var t = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+    try { return JSON.parse(t); } catch (e) { /* 계속 */ }
+    var a = t.indexOf('{'), b = t.lastIndexOf('}');
+    if (a >= 0 && b > a) { try { return JSON.parse(t.slice(a, b + 1)); } catch (e2) { return null; } }
+    return null;
+  }
+  function str(x) { return typeof x === 'string' ? x.trim() : ''; }
+  var PRAISE = /(great job|good job|well done|perfect|잘했|훌륭|완벽|좋아요!?$)/i;
+  /** LLM 응답 → PRD 스키마로 정규화. 최대 3개, 칭찬만 있는 항목 제거 */
+  function validateFeedback(raw) {
+    var o = parseJSONLoose(raw);
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return { ok: false, error: 'not-json' };
+    var items = Array.isArray(o.items) ? o.items : [];
+    var seen = {};
+    var clean = [];
+    items.forEach(function (it) {
+      if (!it || typeof it !== 'object') return;
+      var original = str(it.original), improved = str(it.improved), issue = str(it.issue_ko);
+      if (!original || !improved) return;
+      if (!issue) return;
+      if (PRAISE.test(issue) && tokens(original).join(' ') === tokens(improved).join(' ')) return;
+      var key = tokens(improved).join(' ');
+      if (seen[key]) return;
+      seen[key] = 1;
+      clean.push({
+        original: original, issue_ko: issue, improved: improved,
+        layer: LAYERS.indexOf(it.layer) >= 0 ? it.layer : 'naturalness',
+        severity: SEVERITIES.indexOf(it.severity) >= 0 ? it.severity : 'medium'
+      });
+    });
+    var sevRank = { high: 0, medium: 1, low: 2 };
+    clean.sort(function (a, b) { return sevRank[a.severity] - sevRank[b.severity]; });
+    var data = {
+      comprehensible: typeof o.comprehensible === 'boolean' ? o.comprehensible : true,
+      on_topic: typeof o.on_topic === 'boolean' ? o.on_topic : true,
+      items: clean.slice(0, 3),
+      repair_question: str(o.repair_question) || null
+    };
+    if (!data.on_topic && !data.repair_question) data.repair_question = 'Sorry, I want to make sure I understood. Could you say that another way?';
+    if (data.on_topic) data.repair_question = data.repair_question || null;
+    return { ok: true, data: data, dropped: items.length - data.items.length };
+  }
+  /** 교정 항목이 0개일 때: 가장 긴 발화를 더 매끄럽게 다시 말하기 (칭찬만 하는 카드 금지) */
+  function fallbackItem(utterances) {
+    var best = (utterances || []).filter(Boolean).sort(function (a, b) { return b.length - a.length; })[0];
+    if (!best) return null;
+    return { original: best, issue_ko: '의미는 잘 통했어요. 같은 문장을 멈춤 없이 한 번에 말하면 더 잘 통합니다.', improved: best, layer: 'delivery', severity: 'low' };
+  }
+  function validateRoleplay(raw) {
+    var o = parseJSONLoose(raw);
+    if (!o || typeof o !== 'object') return { ok: false, error: 'not-json' };
+    var reply = str(o.reply);
+    if (!reply) return { ok: false, error: 'no-reply' };
+    return { ok: true, data: {
+      reply: reply,
+      understood: o.understood !== false,
+      on_topic: o.on_topic !== false,
+      is_repair: !!o.is_repair || /^(do you mean|you mean|sorry, do you mean|just to check)/i.test(reply),
+      end: !!o.end
+    } };
+  }
+
+  /* ---------------- v2: 오류 노트 ---------------- */
+  function errorKey(item) { return tokens(item.improved).join(' '); }
+  function addError(list, item, now) {
+    var out = (list || []).slice(), key = errorKey(item), d = dayKey(now);
+    for (var i = 0; i < out.length; i++) {
+      if (out[i].key === key || (tokens(out[i].original).join(' ') === tokens(item.original).join(' '))) {
+        var e = JSON.parse(JSON.stringify(out[i]));
+        e.count += 1; e.lastAt = now; if (e.dates.indexOf(d) < 0) e.dates.push(d);
+        e.original = item.original; e.issue_ko = item.issue_ko;
+        out[i] = e;
+        return out;
+      }
+    }
+    out.push({ key: key, original: item.original, improved: item.improved, issue_ko: item.issue_ko, layer: item.layer || 'naturalness', count: 1, firstAt: now, lastAt: now, dates: [d], warmups: 0 });
+    return out;
+  }
+  function recentErrors(list, now, days) {
+    var since = now - (days || 14) * DAY;
+    return (list || []).filter(function (e) { return e.lastAt >= since; })
+      .sort(function (a, b) { return (b.count - a.count) || (b.lastAt - a.lastAt); });
+  }
+  /** 워밍업에 넣을 1개: 최근 2주 반복 오류 우선 → 없으면 어제 못 쓴 청크 */
+  function pickWarmup(errors, missedCards, now) {
+    var rec = recentErrors(errors, now, 14).filter(function (e) { return e.lastAt < studyDayStart(now); });
+    rec.sort(function (a, b) { return (b.count - a.count) || (a.warmups - b.warmups) || (b.lastAt - a.lastAt); });
+    if (rec.length) return { kind: 'error', key: rec[0].key, script: rec[0].improved, focus: rec[0].issue_ko, original: rec[0].original };
+    var c = (missedCards || [])[0];
+    if (c) return { kind: 'chunk', cardId: c.id, script: c.example || c.en, focus: '어제 못 쓴 청크: ' + c.en };
+    return null;
+  }
+
+  /* ---------------- v2: 녹음 레벨 분석 (침묵·말한 길이) ---------------- */
+  /** levels: RMS 배열, frameMs 간격. 잡음 적응 임계값. 1초 이상 침묵을 '멈춤'으로 센다 */
+  function analyzeLevels(levels, frameMs, opt) {
+    opt = opt || {};
+    var n = levels.length;
+    if (!n) return { durationSec: 0, voicedSec: 0, pauses: 0, longestPauseSec: 0 };
+    var sorted = levels.slice().sort(function (a, b) { return a - b; });
+    var floor = sorted[Math.floor(n * 0.1)] || 0;
+    var p90 = sorted[Math.floor(n * 0.9)] || 0;
+    // 바닥 소음의 2.5배. 단 계속 말해서 '바닥'이 말소리일 때를 위해 상위 10% 레벨의 40%를 넘지 않게
+    var thr = Math.max(opt.minThreshold || 0.012, Math.min(floor * 2.5, p90 * 0.4));
+    var voiced = levels.map(function (v) { return v > thr; });
+    var first = voiced.indexOf(true), last = voiced.lastIndexOf(true);
+    var vCount = voiced.filter(Boolean).length;
+    var pauses = 0, longest = 0, run = 0, minPauseFrames = Math.round((opt.pauseMs || 1000) / frameMs);
+    if (first >= 0) {
+      for (var i = first; i <= last; i++) {
+        if (!voiced[i]) run++;
+        else { if (run >= minPauseFrames) pauses++; longest = Math.max(longest, run); run = 0; }
+      }
+    }
+    return {
+      durationSec: Math.round(n * frameMs / 100) / 10,
+      voicedSec: Math.round(vCount * frameMs / 100) / 10,
+      pauses: pauses,
+      longestPauseSec: Math.round(longest * frameMs / 100) / 10
+    };
+  }
+
+  /* ---------------- v2: v1 → v2 마이그레이션 ---------------- */
+  function migrateV1(v1, fresh) {
+    var d = fresh;
+    if (!v1 || !Array.isArray(v1.cards)) return d;
+    var st = v1.settings || {};
+    d.migratedFrom = 1;
+    d.migratedAt = Date.now();
+    d.cards = v1.cards.map(function (c) { return JSON.parse(JSON.stringify(c)); });
+    d.deletedIds = (v1.deletedIds || []).slice();
+    d.log = JSON.parse(JSON.stringify(v1.log || {}));
+    if (typeof st.ttsRate === 'number') d.settings.rate = Math.min(1.1, Math.max(0.8, st.ttsRate));
+    if (st.voiceURI) d.settings.voiceURI = st.voiceURI;
+    if (typeof st.newPerDay === 'number') d.settings.newPerDay = st.newPerDay;
+    if (typeof st.maxReviews === 'number') d.settings.maxReviews = st.maxReviews;
+    if (typeof st.latencyThreshold === 'number') d.settings.latencyThreshold = st.latencyThreshold;
+    if (typeof st.autoPlay === 'boolean') d.settings.autoPlay = st.autoPlay;
+    if (typeof st.useRecognition === 'boolean') d.settings.useWebSpeech = st.useRecognition;
+    return d;
+  }
+
   var api = {
     Scheduler: { DEFAULTS: DEFAULTS, GRADES: GRADES, MIN: MIN, DAY: DAY, schedule: schedule, preview: preview, newSrs: newSrs, isDue: isDue, studyDayStart: studyDayStart, addDays: addDays, dayKey: dayKey, formatInterval: formatInterval, formatDays: formatDays },
-    Text: { analyze: analyze, tokens: tokens, compare: compare, containsChunk: containsChunk, suggestGrade: suggestGrade },
-    Mix: { shuffle: shuffle, interleave: interleave, roundRobin: roundRobin }
+    Text: { analyze: analyze, tokens: tokens, compare: compare, containsChunk: containsChunk, suggestGrade: suggestGrade, cloze: cloze },
+    Mix: { shuffle: shuffle, interleave: interleave, roundRobin: roundRobin },
+    Days: { weekStart: weekStart, weekKeys: weekKeys, streak: streak, weekStats: weekStats, isActiveDay: isActiveDay },
+    Routine: { STEPS: STEPS, durations: durations, fourThreeTwo: fourThreeTwo, plan: routinePlan, create: createRoutine, completeStep: completeStep, isComplete: isRoutineComplete, checklist: checklist },
+    Feedback: { parseJSON: parseJSONLoose, validate: validateFeedback, fallbackItem: fallbackItem, validateRoleplay: validateRoleplay, LAYERS: LAYERS, SEVERITIES: SEVERITIES },
+    Errors: { add: addError, recent: recentErrors, pickWarmup: pickWarmup, key: errorKey },
+    Audio: { analyzeLevels: analyzeLevels },
+    Migrate: { v1: migrateV1 }
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SpeakCore = api;

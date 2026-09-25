@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#2f6f6a">
-  <meta name="description" content="매일 10분, 입에서 영어 표현이 자동으로 나오게 하는 개인 말하기 연습">
+  <meta name="description" content="매일 10~30분, 듣고 따라 말하고 직접 말하고 교정 후 다시 말하는 개인 영어 말하기 루틴">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="말하기">
-  <title>말하기 연습</title>
+  <title>말하기 루틴</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -18,15 +18,18 @@
 <body>
   <div id="app" class="wrap" aria-live="polite"></div>
   <nav id="tabbar" class="tabbar" aria-label="메뉴">
-    <a href="#/home" data-tab="home"><span>🏠</span>홈</a>
-    <a href="#/cards" data-tab="cards"><span>🗂️</span>카드</a>
+    <a href="#/home" data-tab="home"><span>🎙️</span>오늘</a>
+    <a href="#/chunks" data-tab="chunks"><span>🧱</span>청크</a>
+    <a href="#/progress" data-tab="progress"><span>📈</span>진행</a>
     <a href="#/settings" data-tab="settings"><span>⚙️</span>설정</a>
-    <a href="#/why" data-tab="why"><span>❓</span>왜?</a>
   </nav>
   <div id="toast" class="toast" role="status"></div>
   <noscript>이 앱은 JavaScript가 필요해요.</noscript>
   <script src="data.js"></script>
+  <script src="content.js"></script>
   <script src="core.js"></script>
+  <script src="media.js"></script>
+  <script src="ai.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

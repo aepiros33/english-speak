@@ -124,10 +124,10 @@ test('interleave: 가능한 경우 같은 카테고리 연속 없음', () => {
 });
 test('roundRobin: 시드 도입 순서가 카테고리를 돌아가며', () => {
   global.window = {}; require('../data.js');
-  const out = M.roundRobin(window.SPEAK_SEED, c => c.category, ['meeting', 'smalltalk', 'request', 'opinion', 'schedule', 'reaction', 'followup', 'daily']);
-  assert.strictEqual(out.length, 40);
+  const out = M.roundRobin(window.SPEAK_SEED, c => c.category, ['meeting', 'smalltalk', 'request', 'opinion', 'schedule', 'reaction', 'followup', 'daily', 'travel', 'interview']);
+  assert.strictEqual(out.length, 100);
   assert.deepStrictEqual(out.slice(0, 5).map(c => c.category), ['meeting', 'smalltalk', 'request', 'opinion', 'schedule']);
-  const ids = new Set(window.SPEAK_SEED.map(c => c.id)); assert.strictEqual(ids.size, 40, 'id 중복 없음');
+  const ids = new Set(window.SPEAK_SEED.map(c => c.id)); assert.strictEqual(ids.size, 100, 'id 중복 없음');
   window.SPEAK_SEED.forEach(c => ['id', 'en', 'ko', 'example', 'slot', 'category'].forEach(f => assert.ok(c[f], c.id + ' missing ' + f)));
 });
 console.log(`\n${passed} tests passed`);

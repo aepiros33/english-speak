@@ -1,8 +1,8 @@
 /* 간단한 서비스 워커: 앱 파일을 캐시해 오프라인에서도 열리게 함.
    파일을 수정해 배포할 때는 CACHE 이름의 버전을 올리세요. */
-var CACHE = 'speak-app-v2';
+var CACHE = 'speak-app-v3';
 var ASSETS = [
-  './', './index.html', './style.css', './app.js', './core.js', './data.js', './manifest.json',
+  './', './index.html', './style.css', './app.js', './core.js', './data.js', './content.js', './media.js', './ai.js', './manifest.json',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'
 ];
 self.addEventListener('install', function (e) {
