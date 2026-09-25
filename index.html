@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2f6f6a">
+  <meta name="description" content="매일 10분, 입에서 영어 표현이 자동으로 나오게 하는 개인 말하기 연습">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="말하기">
+  <title>말하기 연습</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app" class="wrap" aria-live="polite"></div>
+  <nav id="tabbar" class="tabbar" aria-label="메뉴">
+    <a href="#/home" data-tab="home"><span>🏠</span>홈</a>
+    <a href="#/cards" data-tab="cards"><span>🗂️</span>카드</a>
+    <a href="#/settings" data-tab="settings"><span>⚙️</span>설정</a>
+    <a href="#/why" data-tab="why"><span>❓</span>왜?</a>
+  </nav>
+  <div id="toast" class="toast" role="status"></div>
+  <noscript>이 앱은 JavaScript가 필요해요.</noscript>
+  <script src="data.js"></script>
+  <script src="core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
